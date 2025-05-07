@@ -6,9 +6,10 @@ from typing import List, Tuple, Optional
 from dataclasses import dataclass
 
 INPUT_FILE = "./plugin.json"
-OUTPUT_FILE = "output/filtered_plugin.json"
+OUTPUT_FILE = "filtered_plugin.json"
 TIMEOUT = 5  # seconds
 CONCURRENCY = 10  # max concurrent requests
+
 
 @dataclass
 class Plugin:
@@ -17,21 +18,15 @@ class Plugin:
     """
     name: str
     url: str
+    version: str
+
 
 async def is_url_valid(session: aiohttp.ClientSession, plugin: Plugin) -> tuple[bool, Plugin, Optional[str]]:
     """
-    Check if the URL in the plugin is valid (returns a 2xx HTTP status).
-    
-    Args:
-        session: aiohttp session to perform requests.
-        plugin: A Plugin object with a 'url' and possibly a 'name'.
-        
-    Returns:
-        A tuple (is_valid: bool, plugin: Plugin, reason: Optional[str]).
-    """
 
-    if not url:
-        return False, plugin, "Missing URL field"
+    Returns:
+        A tuple (is_valid: bool, plugin: Plugin, err: Optional[str]).
+    """
 
     try:
         async with session.head(plugin.url, timeout=TIMEOUT, allow_redirects=True) as response:
@@ -41,17 +36,13 @@ async def is_url_valid(session: aiohttp.ClientSession, plugin: Plugin) -> tuple[
     except Exception as e:
         return False, plugin, str(e)
 
-async def filter_plugins_async() -> None:
+
+async def main() -> None:
     """
     Filters the plugins in the input file and writes the result to an output file. 
     Concurrently checks URLs and saves valid plugins.
     """
-    os.makedirs("output", exist_ok=True)
-
-    # Load plugins from the input JSON file
-    with open(INPUT_FILE, "r", encoding="utf-8") as infile:
-        data = json.load(infile)
-    plugins: List[Plugin] = [Plugin(**plugin) for plugin in data.get("plugins", [])]
+    os.makedirs('./dist', exist_ok=True)
 
     connector = aiohttp.TCPConnector(limit=CONCURRENCY)
     timeout = aiohttp.ClientTimeout(total=TIMEOUT)
@@ -59,43 +50,40 @@ async def filter_plugins_async() -> None:
     valid_plugins: List[Plugin] = []
     invalid_plugins: List[Tuple[str, str, str]] = []
 
+    with open(INPUT_FILE, "r", encoding="utf-8") as infile:
+        data = json.load(infile)
     # Perform URL validation concurrently
     async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
-        tasks = [is_url_valid(session, plugin) for plugin in plugins]
-        results = await asyncio.gather(*tasks)
+        results = await asyncio.gather(
+            *[is_url_valid(session, Plugin(**plugin_dict)) for plugin_dict in data.get("plugins", [])])
 
         for is_valid, plugin, reason in results:
             if is_valid:
                 valid_plugins.append(plugin)
             else:
-                name = plugin.name or "unknown"
-                url = plugin.url or "no-url"
-                invalid_plugins.append((name, url, reason))
+                invalid_plugins.append((plugin.name, plugin.url, reason))
 
     # Write valid plugins to output file
-    filtered_data = {
-        "desc": data.get("desc", ""),
-        "plugins": [plugin.__dict__ for plugin in valid_plugins]
-    }
 
-    with open(OUTPUT_FILE, "w", encoding="utf-8") as outfile:
-        json.dump(filtered_data, outfile, indent=2, ensure_ascii=False)
+    with open(f'./dist/{OUTPUT_FILE}', "w", encoding="utf-8") as outfile:
+        json.dump(
+            {
+                "desc": data.get("desc", ""),
+                "plugins": [plugin.__dict__ for plugin in valid_plugins]
+            },
+            outfile,
+            indent=2,
+            ensure_ascii=False,
+        )
 
-    # Print invalid plugin details to stdout
     print(f"\n✅ Valid plugins: {len(valid_plugins)}")
-    print(f"❌ Invalid plugins: {len(invalid_plugins)}\n")
 
     if invalid_plugins:
+        print(f"❌ Invalid plugins: {len(invalid_plugins)}")
         print("List of invalid plugins:")
         for name, url, reason in invalid_plugins:
             print(f"- [{name}] {url} — {reason}")
 
-def main() -> None:
-    """
-    Entry point of the script, runs the filtering process asynchronously.
-    """
-    asyncio.run(filter_plugins_async())
 
 if __name__ == "__main__":
-    main()
-
+    asyncio.run(main())
