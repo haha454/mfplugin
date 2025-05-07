@@ -34,7 +34,7 @@ async def is_url_valid(session: aiohttp.ClientSession, plugin: Plugin) -> tuple[
                 return True, plugin, None
             return False, plugin, f"HTTP {response.status}"
     except Exception as e:
-        return False, plugin, str(e)
+        return False, plugin, repr(e)
 
 
 async def main() -> None:
